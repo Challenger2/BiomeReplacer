@@ -1,0 +1,4 @@
+name: BiomeReplacer
+main: org.challenger2.BiomeReplacer.BiomeReplacer
+version: 1.0
+depend: [ProtocolLib]
