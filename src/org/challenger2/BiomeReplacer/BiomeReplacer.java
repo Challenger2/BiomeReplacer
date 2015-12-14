@@ -1,10 +1,17 @@
-package org.challenger2.BiomeReplacer;
+	package org.challenger2.BiomeReplacer;
 
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.logging.Logger;
 
+import org.bukkit.ChatColor;
+import org.bukkit.World;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import com.comphenix.protocol.PacketType;
@@ -17,38 +24,47 @@ import com.comphenix.protocol.reflect.StructureModifier;
 public class BiomeReplacer extends JavaPlugin {
 	
 	private final int BIOME_ARRAY_SIZE = 256;
-	private static final Logger log = Logger.getLogger("Minecraft");
+	private final String USAGE = ChatColor.GREEN + "USAGE: /BiomeReplacer enable WORLD BIOME_NUMBER\n         /BiomeReplacer disable WORLD";
 	
-	private class MyPacketAdapter extends PacketAdapter {
-			public MyPacketAdapter(BiomeReplacer p) {
-				super(p, PacketType.Play.Server.MAP_CHUNK, PacketType.Play.Server.MAP_CHUNK_BULK);
-			}
+	private static final Logger log = Logger.getLogger("Minecraft");
+	private Map<String, Integer> enabledWorlds = new HashMap<String, Integer>();
 
-			@Override
-			public void onPacketSending(PacketEvent event) {
+	private class MyPacketAdapter extends PacketAdapter {
+		public MyPacketAdapter(BiomeReplacer p) {
+			super(p, PacketType.Play.Server.MAP_CHUNK, PacketType.Play.Server.MAP_CHUNK_BULK);
+		}
+
+		@Override
+		public void onPacketSending(PacketEvent event) {
+
+			String worldName = event.getPlayer().getWorld().getName().toLowerCase();
+			if(enabledWorlds.containsKey(worldName)) {
+				int biomeID = enabledWorlds.get(worldName);
 				final PacketType type = event.getPacketType();
 				if (type == PacketType.Play.Server.MAP_CHUNK) {
-					TranslateChunk(event);
+					TranslateChunk(event, (byte)biomeID);
 				} else if (type == PacketType.Play.Server.MAP_CHUNK_BULK) {
-					TranslateBulk(event);
+					TranslateBulk(event, (byte)biomeID);
 				}
 			}
+		}
 	}
 
 	private PacketAdapter adapter;
 
-	/**
+	/*
 	 * Plugin initiation
 	 * 
 	 * Register for outgoing chunk packets and rewrite biome data
 	 */
 	@Override
 	public void onEnable() {
+		LoadConfig();
 		adapter = new MyPacketAdapter(this);
 		ProtocolLibrary.getProtocolManager().addPacketListener(adapter);
 	}
 
-	/**
+	/*
 	 * Shut everything down
 	 */
 	@Override
@@ -57,7 +73,102 @@ public class BiomeReplacer extends JavaPlugin {
 		adapter = null;
 	}
 
-	/**
+	@Override
+	public boolean onCommand(CommandSender sender, Command command, String name, String[] args) {
+		if (name.equalsIgnoreCase("BiomeReplacer"))  {
+			if (args.length == 1 && args[0].equalsIgnoreCase("help")) {
+				sender.sendMessage(USAGE);
+			} else if (args.length == 3 && args[0].equalsIgnoreCase("enable")) {
+				CmdEnableWorld(sender, args);
+			} else if (args.length == 2 && args[0].equalsIgnoreCase("disable")) {
+				CmdDisableWorld(sender, args);
+			} else {
+				sender.sendMessage(USAGE);
+			}
+			return true;
+		} else {
+			return false;
+		}
+	}
+	
+	/*
+	 * Enable the requested world
+	 * 
+	 */
+	private void CmdEnableWorld(CommandSender sender, String[] args) {
+		if(!sender.hasPermission("BiomeReplacer.enable")) {
+			sender.sendMessage(ChatColor.RED + "You don't have permission to use /BiomeReplace enable");
+			return;
+		}
+
+		String worldName = args[1];
+		String biomeNumber = args[2];
+		int biomeID = 0;
+
+		try {
+			// We parse as an integer to get numbers bigger than 127 into the byte
+			biomeID = Integer.parseInt(biomeNumber);
+		} catch (NumberFormatException e) {
+			sender.sendMessage(ChatColor.RED + "Invliad Biome");
+			return;
+		}
+
+		for (World world : getServer().getWorlds()) {
+			if (world.getName().equalsIgnoreCase(worldName)) {
+				enabledWorlds.put(worldName.toLowerCase(), biomeID);
+				sender.sendMessage(ChatColor.GREEN + "Biome replacement enabled");
+				SaveConfig();
+				return;
+			}
+		}
+		sender.sendMessage(ChatColor.RED + "Unknown world");
+	}
+	
+	/*
+	 * Disable the requested world
+	 * 
+	 */
+	private void CmdDisableWorld(CommandSender sender, String[] args) {
+		if(!sender.hasPermission("BiomeReplacer.enable")) {
+			sender.sendMessage(ChatColor.RED + "You don't have permission to use /BiomeReplace disable");
+			return;
+		}
+
+		String worldName = args[1].toLowerCase();
+		if (enabledWorlds.containsKey(worldName)) {
+			enabledWorlds.remove(worldName);
+			sender.sendMessage(ChatColor.GREEN + "World removed");
+			SaveConfig();
+		} else {
+			sender.sendMessage(ChatColor.RED + "World not found or not enabled");
+		}
+	}
+	
+	private void LoadConfig()
+	{
+		enabledWorlds.clear();
+		try {
+			ConfigurationSection s = getConfig().getConfigurationSection("BiomeReplacements");
+			if (s != null) {
+				Map<String, Object> m = s.getValues(false);
+				if (m != null) {
+					for (String world : m.keySet()) {
+						enabledWorlds.put(world, (int)m.get(world));
+					}
+				}
+			}
+		} catch (Exception e) {
+			log.warning("BiomeReplacer: Failed to load configuration file");
+		}
+	}
+
+	private void SaveConfig()
+	{
+		getConfig().createSection("BiomeReplacements", enabledWorlds);
+		this.saveConfig();
+	}
+
+	/*
 	 * Translate a Chunk object to a new biome
 	 * 
 	 * event.getPacket gets an NMS object with the following structure
@@ -85,7 +196,7 @@ public class BiomeReplacer extends JavaPlugin {
 	 * 
 	 * @param event
 	 */
-	private void TranslateChunk(PacketEvent event)
+	private void TranslateChunk(PacketEvent event, byte biomeID)
 	{
 		try{
 			PacketContainer packet = event.getPacket();
@@ -98,14 +209,14 @@ public class BiomeReplacer extends JavaPlugin {
 
 			// Biome data is only present if this flag is set.
 			if (hasContinous) {
-				ReplaceBiome(data);
+				ReplaceBiome(data, biomeID);
 			}
 		} catch (IllegalAccessException e) {
 			log.severe("Failed to get single chunk data:\n" + e.toString());
 		}
 	}
 
-	/**
+	/*
 	 * translate a Chunk Builk object to a new biome
 	 * 
 	 * We use event.getPacket to get a structure like this one:
@@ -134,7 +245,7 @@ public class BiomeReplacer extends JavaPlugin {
 	 * 
 	 * @param event
 	 */
-	private void TranslateBulk(PacketEvent event)
+	private void TranslateBulk(PacketEvent event, byte biomeID)
 	{
 		try {
 			PacketContainer packet = event.getPacket();
@@ -145,17 +256,17 @@ public class BiomeReplacer extends JavaPlugin {
 				Object chunk = Array.get(chunkArray, i);
 				Field[] fields = chunk.getClass().getDeclaredFields();
 				byte[] data = byte[].class.cast(fields[0].get(chunk));
-				ReplaceBiome(data);
+				ReplaceBiome(data, biomeID);
 			}
 		} catch (IllegalAccessException e) {
 			log.severe("Failed to get bunk chunk data:\n" + e.toString());
 		}
 	}
 
-	private void ReplaceBiome(byte[] data)
+	private void ReplaceBiome(byte[] data, byte biomeID)
 	{		
 		if (data.length > BIOME_ARRAY_SIZE) {
-			Arrays.fill(data, data.length - BIOME_ARRAY_SIZE, data.length, (byte)140); // Ice Spikes
+			Arrays.fill(data, data.length - BIOME_ARRAY_SIZE, data.length, biomeID); // Ice Spikes 140
 		}
 	}
 
