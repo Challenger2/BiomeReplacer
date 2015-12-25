@@ -1,6 +1,8 @@
 name: BiomeReplacer
 main: org.challenger2.BiomeReplacer.BiomeReplacer
-version: 1.1
+version: ${project.version}
+description: ${project.description}
+website: ${project.url}
 depend: [ProtocolLib]
 permissions:
   BiomeReplacer.enable:
