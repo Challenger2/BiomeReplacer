@@ -24,27 +24,31 @@ import com.comphenix.protocol.reflect.StructureModifier;
 public class BiomeReplacer extends JavaPlugin {
 	
 	private final int BIOME_ARRAY_SIZE = 256;
-	private final String USAGE = ChatColor.GREEN + "USAGE: /BiomeReplacer enable WORLD BIOME_NUMBER\n         /BiomeReplacer disable WORLD";
-	
+
 	private static final Logger log = Logger.getLogger("Minecraft");
 	private Map<String, Integer> enabledWorlds = new HashMap<String, Integer>();
 
+	/**
+	 * Catch packet events
+	 */
 	private class MyPacketAdapter extends PacketAdapter {
 		public MyPacketAdapter(BiomeReplacer p) {
 			super(p, PacketType.Play.Server.MAP_CHUNK, PacketType.Play.Server.MAP_CHUNK_BULK);
 		}
 
+		/**
+		 * Catch and handle MAP_CHUNK and MAP_CHUNK_BULK packets
+		 */
 		@Override
 		public void onPacketSending(PacketEvent event) {
-
 			String worldName = event.getPlayer().getWorld().getName().toLowerCase();
 			if(enabledWorlds.containsKey(worldName)) {
 				int biomeID = enabledWorlds.get(worldName);
 				final PacketType type = event.getPacketType();
 				if (type == PacketType.Play.Server.MAP_CHUNK) {
-					TranslateChunk(event, (byte)biomeID);
+					TranslateChunk(event.getPacket(), (byte)biomeID);
 				} else if (type == PacketType.Play.Server.MAP_CHUNK_BULK) {
-					TranslateBulk(event, (byte)biomeID);
+					TranslateBulk(event.getPacket(), (byte)biomeID);
 				}
 			}
 		}
@@ -52,7 +56,7 @@ public class BiomeReplacer extends JavaPlugin {
 
 	private PacketAdapter adapter;
 
-	/*
+	/**
 	 * Plugin initiation
 	 * 
 	 * Register for outgoing chunk packets and rewrite biome data
@@ -64,7 +68,7 @@ public class BiomeReplacer extends JavaPlugin {
 		ProtocolLibrary.getProtocolManager().addPacketListener(adapter);
 	}
 
-	/*
+	/**
 	 * Shut everything down
 	 */
 	@Override
@@ -73,25 +77,39 @@ public class BiomeReplacer extends JavaPlugin {
 		adapter = null;
 	}
 
+	/**
+	 * Handle player commands
+	 */
 	@Override
 	public boolean onCommand(CommandSender sender, Command command, String name, String[] args) {
 		if (name.equalsIgnoreCase("BiomeReplacer"))  {
 			if (args.length == 1 && args[0].equalsIgnoreCase("help")) {
-				sender.sendMessage(USAGE);
+				PrintUsage(sender);
 			} else if (args.length == 3 && args[0].equalsIgnoreCase("enable")) {
 				CmdEnableWorld(sender, args);
 			} else if (args.length == 2 && args[0].equalsIgnoreCase("disable")) {
 				CmdDisableWorld(sender, args);
+			} else if (args.length == 1 && args[0].equalsIgnoreCase("list")) {
+				CmdList(sender);
+			} else if (args.length == 1 && args[0].equalsIgnoreCase("listbiomes")) {
+				CmdListBiomes(sender);
 			} else {
-				sender.sendMessage(USAGE);
+				PrintUsage(sender);
 			}
 			return true;
 		} else {
 			return false;
 		}
 	}
+
+	public void PrintUsage(CommandSender sender) {
+		sender.sendMessage(ChatColor.GREEN + "USAGE: /BiomeReplacer enable WORLD {BIOME_NUMBER | BIOME_NAME}");
+		sender.sendMessage(ChatColor.GREEN + "       /BiomeReplacer disable WORLD");
+		sender.sendMessage(ChatColor.GREEN + "       /BiomeReplacer list");
+		sender.sendMessage(ChatColor.GREEN + "       /BiomeReplacer listBiomes");
+	}
 	
-	/*
+	/**
 	 * Enable the requested world
 	 * 
 	 */
@@ -102,20 +120,16 @@ public class BiomeReplacer extends JavaPlugin {
 		}
 
 		String worldName = args[1];
-		String biomeNumber = args[2];
-		int biomeID = 0;
-
-		try {
-			// We parse as an integer to get numbers bigger than 127 into the byte
-			biomeID = Integer.parseInt(biomeNumber);
-		} catch (NumberFormatException e) {
-			sender.sendMessage(ChatColor.RED + "Invliad Biome");
+		String biomeArg = args[2];
+		BiomeID biome = BiomeID.lookupName(biomeArg);
+		if (biome == null) {
+			sender.sendMessage(ChatColor.RED + "Invalid Biome");
 			return;
 		}
 
 		for (World world : getServer().getWorlds()) {
 			if (world.getName().equalsIgnoreCase(worldName)) {
-				enabledWorlds.put(worldName.toLowerCase(), biomeID);
+				enabledWorlds.put(worldName.toLowerCase(), biome.getID());
 				sender.sendMessage(ChatColor.GREEN + "Biome replacement enabled");
 				SaveConfig();
 				return;
@@ -123,10 +137,9 @@ public class BiomeReplacer extends JavaPlugin {
 		}
 		sender.sendMessage(ChatColor.RED + "Unknown world");
 	}
-	
-	/*
+
+	/**
 	 * Disable the requested world
-	 * 
 	 */
 	private void CmdDisableWorld(CommandSender sender, String[] args) {
 		if(!sender.hasPermission("BiomeReplacer.enable")) {
@@ -143,32 +156,72 @@ public class BiomeReplacer extends JavaPlugin {
 			sender.sendMessage(ChatColor.RED + "World not found or not enabled");
 		}
 	}
-	
+
+	/**
+	 * List all biome replacements
+	 */
+	private void CmdList(CommandSender sender) {
+		for (String key : enabledWorlds.keySet()) {
+			int biomeID = enabledWorlds.get(key);
+			BiomeID biome = BiomeID.lookupID(biomeID);
+			String biomeName = null;
+			if (biome == null) {
+				biomeName = "<Unknown Biome = " + biomeID + ">";
+			} else {
+				biomeName = biome.name();
+			}
+			sender.sendMessage(ChatColor.GREEN + key + ": " + biomeName);;
+		}
+	}
+
+	private void CmdListBiomes(CommandSender sender) {
+		StringBuilder sb = new StringBuilder(ChatColor.GREEN + "");
+		boolean first = true;
+		for (BiomeID biome : BiomeID.values()) {
+			if (first) {
+				first = false;
+			} else {
+				sb.append(", ");
+			}
+			sb.append(biome.name());
+		}
+		sender.sendMessage(sb.toString());
+	}
+
+	/**
+	 * Load config.yml from disk
+	 */
 	private void LoadConfig()
 	{
+		saveDefaultConfig();
 		enabledWorlds.clear();
 		try {
 			ConfigurationSection s = getConfig().getConfigurationSection("BiomeReplacements");
-			if (s != null) {
-				Map<String, Object> m = s.getValues(false);
-				if (m != null) {
-					for (String world : m.keySet()) {
-						enabledWorlds.put(world, (int)m.get(world));
-					}
-				}
+			for (String key : s.getKeys(false)) {
+				enabledWorlds.put(key, s.getInt(key));
 			}
 		} catch (Exception e) {
 			log.warning("BiomeReplacer: Failed to load configuration file");
 		}
 	}
 
+	/**
+	 * Save biome data to disk
+	 */
 	private void SaveConfig()
 	{
-		getConfig().createSection("BiomeReplacements", enabledWorlds);
-		this.saveConfig();
+		try {
+			ConfigurationSection s = getConfig().createSection("BiomeReplacements");
+			for (String world : enabledWorlds.keySet()) {
+				s.set(world, enabledWorlds.get(world));
+			}
+			saveConfig();
+		} catch (Exception e) {
+			log.warning("BiomeReplacer: Failed to save configuration file");
+		}
 	}
 
-	/*
+	/**
 	 * Translate a Chunk object to a new biome
 	 * 
 	 * event.getPacket gets an NMS object with the following structure
@@ -194,12 +247,12 @@ public class BiomeReplacer extends JavaPlugin {
      * The biome data is always the last 256 bytes of the chunk data, if
      * the hasContinous flag is set (field d)
 	 * 
-	 * @param event
+	 * @param packet A packet to translate
+	 * @param biomeID The Biome ID to use
 	 */
-	private void TranslateChunk(PacketEvent event, byte biomeID)
+	private void TranslateChunk(PacketContainer packet, byte biomeID)
 	{
 		try{
-			PacketContainer packet = event.getPacket();
 			Object chunk = packet.getModifier().read(2); // grab field 'c'
 			Field[] fields = chunk.getClass().getDeclaredFields(); // get all the fields in the chunk
 			byte[] data = byte[].class.cast(fields[0].get(chunk)); // read the first field from the chunk
@@ -216,7 +269,7 @@ public class BiomeReplacer extends JavaPlugin {
 		}
 	}
 
-	/*
+	/**
 	 * translate a Chunk Builk object to a new biome
 	 * 
 	 * We use event.getPacket to get a structure like this one:
@@ -243,12 +296,12 @@ public class BiomeReplacer extends JavaPlugin {
      * 
      * The biome data is always the last 256 bytes of the chunk data
 	 * 
-	 * @param event
+	 * @param packet A packet to translate
+	 * @param biomeID Biome ID to use
 	 */
-	private void TranslateBulk(PacketEvent event, byte biomeID)
+	private void TranslateBulk(PacketContainer packet, byte biomeID)
 	{
 		try {
-			PacketContainer packet = event.getPacket();
 			Object chunkArray = packet.getModifier().read(2);
 			int numChunks = Array.getLength(chunkArray);
 			
