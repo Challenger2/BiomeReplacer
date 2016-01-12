@@ -197,8 +197,10 @@ public class BiomeReplacer extends JavaPlugin {
 		enabledWorlds.clear();
 		try {
 			ConfigurationSection s = getConfig().getConfigurationSection("BiomeReplacements");
-			for (String key : s.getKeys(false)) {
-				enabledWorlds.put(key, s.getInt(key));
+			if (s != null) {
+				for (String key : s.getKeys(false)) {
+					enabledWorlds.put(key, s.getInt(key));
+				}
 			}
 		} catch (Exception e) {
 			log.warning("BiomeReplacer: Failed to load configuration file");
