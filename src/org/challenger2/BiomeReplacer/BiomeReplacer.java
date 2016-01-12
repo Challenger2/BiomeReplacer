@@ -172,6 +172,9 @@ public class BiomeReplacer extends JavaPlugin {
 			}
 			sender.sendMessage(ChatColor.GREEN + key + ": " + biomeName);;
 		}
+		if (enabledWorlds.isEmpty()) {
+			sender.sendMessage(ChatColor.GREEN + "No biome replacements enabled :(");
+		}
 	}
 
 	private void CmdListBiomes(CommandSender sender) {
