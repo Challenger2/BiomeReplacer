@@ -1,11 +1,8 @@
 	package org.challenger2.BiomeReplacer;
 
-import java.lang.reflect.Array;
-import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.logging.Logger;
 
 import org.bukkit.ChatColor;
 import org.bukkit.World;
@@ -25,15 +22,16 @@ public class BiomeReplacer extends JavaPlugin {
 	
 	private final int BIOME_ARRAY_SIZE = 256;
 
-	private static final Logger log = Logger.getLogger("Minecraft");
 	private Map<String, Integer> enabledWorlds = new HashMap<String, Integer>();
+	
+	private PacketAdapter adapter;
 
 	/**
 	 * Catch packet events
 	 */
 	private class MyPacketAdapter extends PacketAdapter {
 		public MyPacketAdapter(BiomeReplacer p) {
-			super(p, PacketType.Play.Server.MAP_CHUNK, PacketType.Play.Server.MAP_CHUNK_BULK);
+			super(p, PacketType.Play.Server.MAP_CHUNK);
 		}
 
 		/**
@@ -47,14 +45,11 @@ public class BiomeReplacer extends JavaPlugin {
 				final PacketType type = event.getPacketType();
 				if (type == PacketType.Play.Server.MAP_CHUNK) {
 					TranslateChunk(event.getPacket(), (byte)biomeID);
-				} else if (type == PacketType.Play.Server.MAP_CHUNK_BULK) {
-					TranslateBulk(event.getPacket(), (byte)biomeID);
 				}
 			}
 		}
 	}
 
-	private PacketAdapter adapter;
 
 	/**
 	 * Plugin initiation
@@ -206,7 +201,7 @@ public class BiomeReplacer extends JavaPlugin {
 				}
 			}
 		} catch (Exception e) {
-			log.warning("BiomeReplacer: Failed to load configuration file");
+			getLogger().warning("BiomeReplacer: Failed to load configuration file");
 		}
 	}
 
@@ -222,109 +217,49 @@ public class BiomeReplacer extends JavaPlugin {
 			}
 			saveConfig();
 		} catch (Exception e) {
-			log.warning("BiomeReplacer: Failed to save configuration file");
+			getLogger().warning("BiomeReplacer: Failed to save configuration file");
 		}
 	}
 
 	/**
 	 * Translate a Chunk object to a new biome
 	 * 
-	 * event.getPacket gets an NMS object with the following structure
+	 * event.getPacket gets the PacketPlayOutMapChunk NMS object with the following structure
 	 * {
-     *   private int a;
-     *   private int b;
-     *   private PacketPlayOutMapChunk.ChunkMap c;
-     *   private boolean d;
+	 * 
+	 *    private int a; // chunk X
+     *    private int b; // chunk Z
+	 *    private int c; // blocks used mask
+	 *    private byte[] d; // Chunk data
+	 *    private List<NBTTagCompound> e; // NBT Data
+	 *    private boolean f; // hasContinous flag
 	 * }
-	 * Here, field 3 has the data we want.
-	 * 
-	 * After we get a ChunkMap object, we use reflection to get the data out of it
-	 * A ChunkMap looks like this:
-	 * 
-	 * public static class ChunkMap {
-     *   public byte[] a;
-     *   public int b;
-     *   public ChunkMap() {}
-     * }
      * 
-     * Here, a is the raw chunk data and b is the primaryMask
+     * Here, d is the raw chunk data and f is the primaryMask
      * 
      * The biome data is always the last 256 bytes of the chunk data, if
-     * the hasContinous flag is set (field d)
+     * the hasContinous flag is set (field f)
 	 * 
-	 * @param packet A packet to translate
+	 * @param packet A packet to translate. Should be a net.minecraft.server.PacketPlayOutMapChunk
 	 * @param biomeID The Biome ID to use
 	 */
 	private void TranslateChunk(PacketContainer packet, byte biomeID)
 	{
 		try{
-			Object chunk = packet.getModifier().read(2); // grab field 'c'
-			Field[] fields = chunk.getClass().getDeclaredFields(); // get all the fields in the chunk
-			byte[] data = byte[].class.cast(fields[0].get(chunk)); // read the first field from the chunk
-	
-			StructureModifier<Boolean> bools = packet.getBooleans(); // Read field 'd', hasContinous
-			boolean hasContinous = bools.read(0);
+			// Get byte arrays to get the chunk data
+			StructureModifier<byte[]> byteArrays = packet.getByteArrays();
+			byte[] data = byteArrays.read(0); // read first array from PacketPlayOutMapChunk
 
-			// Biome data is only present if this flag is set.
-			if (hasContinous) {
-				ReplaceBiome(data, biomeID);
+			// Get the hasContinous chunk flag.
+			StructureModifier<Boolean> bools = packet.getBooleans();
+			boolean hasContinous = bools.read(0); // read first boolean from PacketPlayOutMapChunk
+
+			// Biome data is only present if hasContinous is set.
+			if (hasContinous && data.length > BIOME_ARRAY_SIZE) {
+				Arrays.fill(data, data.length - BIOME_ARRAY_SIZE, data.length, biomeID); // Ice Spikes 140
 			}
-		} catch (IllegalAccessException e) {
-			log.severe("Failed to get single chunk data:\n" + e.toString());
-		}
-	}
-
-	/**
-	 * translate a Chunk Builk object to a new biome
-	 * 
-	 * We use event.getPacket to get a structure like this one:
-	 * {
-	 *  private int[] a;
-     *	private int[] b;
-     *	private PacketPlayOutMapChunk.ChunkMap[] c;
-     *	private boolean d;
-     *	private World world; // Spigot
-	 * }
-	 * 
-	 * What we want is field c, a ChunkMap array
-	 * 
-	 * After we get a ChunkMap object, we use reflection to get the data out of it
-	 * A ChunkMap looks like this:
-	 * 
-	 * public static class ChunkMap {
-     *   public byte[] a;
-     *   public int b;
-     *   public ChunkMap() {}
-     * }
-     * 
-     * Here, a is the raw chunk data and b is the primaryMask
-     * 
-     * The biome data is always the last 256 bytes of the chunk data
-	 * 
-	 * @param packet A packet to translate
-	 * @param biomeID Biome ID to use
-	 */
-	private void TranslateBulk(PacketContainer packet, byte biomeID)
-	{
-		try {
-			Object chunkArray = packet.getModifier().read(2);
-			int numChunks = Array.getLength(chunkArray);
-			
-			for (int i = 0; i < numChunks; i++) {
-				Object chunk = Array.get(chunkArray, i);
-				Field[] fields = chunk.getClass().getDeclaredFields();
-				byte[] data = byte[].class.cast(fields[0].get(chunk));
-				ReplaceBiome(data, biomeID);
-			}
-		} catch (IllegalAccessException e) {
-			log.severe("Failed to get bunk chunk data:\n" + e.toString());
-		}
-	}
-
-	private void ReplaceBiome(byte[] data, byte biomeID)
-	{		
-		if (data.length > BIOME_ARRAY_SIZE) {
-			Arrays.fill(data, data.length - BIOME_ARRAY_SIZE, data.length, biomeID); // Ice Spikes 140
+		} catch (Exception e) {
+			getLogger().severe("Failed to get single chunk data:\n" + e.toString());
 		}
 	}
 
