@@ -7,6 +7,9 @@ depend: [ProtocolLib]
 permissions:
   BiomeReplacer.enable:
     description: Gives access to /BiomeReplace enable/disable
+  BiomeReplacer.reload:
+    description: Give access to /BiomeReplacer reload
+
 commands:
   BiomeReplacer:
     description: biomeReplacer commands

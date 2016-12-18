@@ -9,6 +9,7 @@ import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import com.comphenix.protocol.PacketType;
@@ -39,12 +40,22 @@ public class BiomeReplacer extends JavaPlugin {
 		 */
 		@Override
 		public void onPacketSending(PacketEvent event) {
+			
+			// See if biome replacement is enabled in this world
 			String worldName = event.getPlayer().getWorld().getName().toLowerCase();
 			if(enabledWorlds.containsKey(worldName)) {
-				int biomeID = enabledWorlds.get(worldName);
-				final PacketType type = event.getPacketType();
-				if (type == PacketType.Play.Server.MAP_CHUNK) {
-					TranslateChunk(event.getPacket(), (byte)biomeID);
+				
+				// See if the player opted out of biome replacement
+				String uuid = event.getPlayer().getUniqueId().toString();
+				boolean optOut = getConfig().getConfigurationSection("OptOut").getBoolean(uuid, false);
+				if (!optOut) {
+
+					// Replace biomes
+					int biomeID = enabledWorlds.get(worldName);
+					final PacketType type = event.getPacketType();
+					if (type == PacketType.Play.Server.MAP_CHUNK) {
+						TranslateChunk(event.getPacket(), (byte)biomeID);
+					}
 				}
 			}
 		}
@@ -77,7 +88,7 @@ public class BiomeReplacer extends JavaPlugin {
 	 */
 	@Override
 	public boolean onCommand(CommandSender sender, Command command, String name, String[] args) {
-		if (name.equalsIgnoreCase("BiomeReplacer"))  {
+		if (command.getName().equalsIgnoreCase("BiomeReplacer"))  {
 			if (args.length == 1 && args[0].equalsIgnoreCase("help")) {
 				PrintUsage(sender);
 			} else if (args.length == 3 && args[0].equalsIgnoreCase("enable")) {
@@ -88,6 +99,12 @@ public class BiomeReplacer extends JavaPlugin {
 				CmdList(sender);
 			} else if (args.length == 1 && args[0].equalsIgnoreCase("listbiomes")) {
 				CmdListBiomes(sender);
+			} else if (args.length == 1 && args[0].equalsIgnoreCase("opt-out")) {
+				OptOut(sender);
+			} else if (args.length == 1 && args[0].equalsIgnoreCase("opt-in")) {
+				OptIn(sender);
+			} else if (args.length == 1 && args[0].equalsIgnoreCase("reload")) {
+				CmdReload(sender);
 			} else {
 				PrintUsage(sender);
 			}
@@ -102,6 +119,8 @@ public class BiomeReplacer extends JavaPlugin {
 		sender.sendMessage(ChatColor.GREEN + "       /BiomeReplacer disable WORLD");
 		sender.sendMessage(ChatColor.GREEN + "       /BiomeReplacer list");
 		sender.sendMessage(ChatColor.GREEN + "       /BiomeReplacer listBiomes");
+		sender.sendMessage(ChatColor.GREEN + "       /BiomeReplacer opt-out");
+		sender.sendMessage(ChatColor.GREEN + "       /BiomeReplacer opt-in");
 	}
 	
 	/**
@@ -172,6 +191,11 @@ public class BiomeReplacer extends JavaPlugin {
 		}
 	}
 
+	/**
+	 * List biomes
+	 * 
+	 * @param sender
+	 */
 	private void CmdListBiomes(CommandSender sender) {
 		StringBuilder sb = new StringBuilder(ChatColor.GREEN + "");
 		boolean first = true;
@@ -185,6 +209,51 @@ public class BiomeReplacer extends JavaPlugin {
 		}
 		sender.sendMessage(sb.toString());
 	}
+	
+	/**
+	 * Opt-Out of biome replacements
+	 * @param sender
+	 */
+	private void OptOut(CommandSender sender) {
+		if (! (sender instanceof Player)) {
+			sender.sendMessage(ChatColor.RED + "Only players can opt-out.");
+			return;
+		}
+		Player player = (Player)sender;
+		getConfig().getConfigurationSection("OptOut").set(player.getUniqueId().toString(), true);
+		SaveConfig();
+		sender.sendMessage(ChatColor.GREEN + "Opt-Out complete.");
+	}
+	
+	/**
+	 * Opt-In to biome replacements
+	 * @param sender
+	 */
+	private void OptIn(CommandSender sender) {
+		if (! (sender instanceof Player)) {
+			sender.sendMessage(ChatColor.RED + "Only players can opt-in.");
+			return;
+		}
+		Player player = (Player)sender;
+		getConfig().getConfigurationSection("OptOut").set(player.getUniqueId().toString(), null);
+		SaveConfig();
+		sender.sendMessage(ChatColor.GREEN + "Opt-In complete.");
+	}
+	
+	/**
+	 * Reload config.yml
+	 * 
+	 * @param sender
+	 */
+	private void CmdReload(CommandSender sender) {
+		if(!sender.hasPermission("BiomeReplacer.reload")) {
+			sender.sendMessage(ChatColor.RED + "You don't have permission to use /BiomeReplace reload");
+			return;
+		}
+		
+		LoadConfig();
+		sender.sendMessage(ChatColor.GREEN + "Configuration reloaded.");
+	}
 
 	/**
 	 * Load config.yml from disk
@@ -192,13 +261,22 @@ public class BiomeReplacer extends JavaPlugin {
 	private void LoadConfig()
 	{
 		saveDefaultConfig();
+		reloadConfig();
 		enabledWorlds.clear();
 		try {
-			ConfigurationSection s = getConfig().getConfigurationSection("BiomeReplacements");
-			if (s != null) {
-				for (String key : s.getKeys(false)) {
-					enabledWorlds.put(key, s.getInt(key));
-				}
+			ConfigurationSection s;
+			
+			s = getConfig().getConfigurationSection("BiomeReplacements");
+			if (s == null) {
+				s = getConfig().createSection("BiomeReplacements");
+			}
+			for (String key : s.getKeys(false)) {
+				enabledWorlds.put(key, s.getInt(key));
+			}
+			
+			s = getConfig().getConfigurationSection("OptOut");
+			if (s == null) {
+				s = getConfig().createSection("OptOut");
 			}
 		} catch (Exception e) {
 			getLogger().warning("BiomeReplacer: Failed to load configuration file");
