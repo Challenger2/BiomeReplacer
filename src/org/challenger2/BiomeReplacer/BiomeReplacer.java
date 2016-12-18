@@ -36,28 +36,39 @@ public class BiomeReplacer extends JavaPlugin {
 		}
 
 		/**
-		 * Catch and handle MAP_CHUNK and MAP_CHUNK_BULK packets
+		 * Catch and handle MAP_CHUNK packets
 		 */
 		@Override
 		public void onPacketSending(PacketEvent event) {
 			
+			// Double check that we have a MAP CHUNK
+			PacketType type = event.getPacketType();
+			if(type != PacketType.Play.Server.MAP_CHUNK) {
+				return;
+			}
+			
 			// See if biome replacement is enabled in this world
 			String worldName = event.getPlayer().getWorld().getName().toLowerCase();
-			if(enabledWorlds.containsKey(worldName)) {
-				
-				// See if the player opted out of biome replacement
-				String uuid = event.getPlayer().getUniqueId().toString();
-				boolean optOut = getConfig().getConfigurationSection("OptOut").getBoolean(uuid, false);
-				if (!optOut) {
-
-					// Replace biomes
-					int biomeID = enabledWorlds.get(worldName);
-					final PacketType type = event.getPacketType();
-					if (type == PacketType.Play.Server.MAP_CHUNK) {
-						TranslateChunk(event.getPacket(), (byte)biomeID);
-					}
-				}
+			if(!enabledWorlds.containsKey(worldName)) {
+				return;
 			}
+				
+			// Get the opt-out configuration section
+			String uuid = event.getPlayer().getUniqueId().toString();
+			ConfigurationSection s = getConfig().getConfigurationSection("OptOut");
+			if (s == null) {
+				return;
+			}
+
+			// See if the player opt-ed out.
+			if (s.getBoolean(uuid, false)) {
+				return;
+			}
+			
+			// Replace biomes
+			int biomeID = enabledWorlds.get(worldName);
+			TranslateChunk(event.getPacket(), (byte)biomeID);
+
 		}
 	}
 
